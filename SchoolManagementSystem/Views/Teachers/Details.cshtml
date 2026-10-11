@@ -1,0 +1,117 @@
+﻿@{
+    Layout = "_Dashboard";
+    ViewBag.PageTitle = "Teachers";
+    ViewBag.SubPageTitle = "Details";
+}
+
+@model SchoolManagementSystem.Models.TeacherViewModel
+
+@{
+    ViewData["Title"] = "Teacher Details";
+}
+
+<h2>Teacher Details</h2>
+<div class="card shadow-sm border-0 mt-3">
+    <div class="card-body p-4">
+        <div class="row align-items-center">
+            <div class="col-md-3 text-center mb-4 mb-md-0">
+                @{
+                    // Kiểm tra xem giáo viên có ảnh thật không
+                    if (Model.ImageId != Guid.Empty)
+                    {
+                        <img src="http://127.0.0.1:10000/devstoreaccount1/teachers/@Model.ImageId"
+                             alt="Profile Picture"
+                             class="img-fluid rounded-circle shadow-sm"
+                             style="width: 150px; height: 150px; object-fit: cover;" />
+                    }
+                    else
+                    {
+                        <img src="https://ui-avatars.com/api/?name=@Model.FirstName+@Model.LastName&background=random&color=fff&rounded=true&size=150"
+                             alt="Default Profile"
+                             class="img-fluid rounded-circle shadow-sm"
+                             style="width: 150px; height: 150px; object-fit: cover;" />
+                    }
+                }
+            </div>
+
+            <div class="col-md-9">
+                <h4 class="mb-3 text-primary" style="font-weight: 600;">@Model.FirstName @Model.LastName</h4>
+                <hr />
+                <dl class="row mb-0">
+                    <dt class="col-sm-3 text-muted" data-toggle="tooltip" title="Date of hire">Hire Date:</dt>
+                    <dd class="col-sm-9 font-weight-bold">@Model.FormattedHireDate</dd>
+
+                    <dt class="col-sm-3 text-muted" data-toggle="tooltip" title="Current status of the teacher">Status:</dt>
+                    <dd class="col-sm-9">
+                        @{
+                            var statusBadge = Model.Status.ToString() == "Pending" ? "badge bg-warning text-dark" :
+                                              Model.Status.ToString() == "Active" ? "badge bg-success" : "badge bg-secondary";
+                        }
+                        <span class="@statusBadge">@Model.Status</span>
+                    </dd>
+
+                    <dt class="col-sm-3 text-muted" data-toggle="tooltip" title="Academic degree of the teacher">Academic Degree:</dt>
+                    <dd class="col-sm-9 font-weight-bold">@Model.AcademicDegree</dd>
+
+                    <dt class="col-sm-3 text-muted">User ID:</dt>
+                    <dd class="col-sm-9 text-secondary" style="font-size: 0.9em;">@Model.UserId</dd>
+
+                    <dt class="col-sm-3 text-muted mt-2" data-toggle="tooltip" title="Classes the teacher is associated with">School Classes:</dt>
+                    <dd class="col-sm-9 mt-2">
+                        @if (Model.SchoolClasses != null && Model.SchoolClasses.Any())
+                        {
+                            <ul class="list-unstyled mb-0">
+                                @foreach (var schoolClass in Model.SchoolClasses)
+                                {
+                                    <li><i class="fas fa-chalkboard text-info me-2"></i> @schoolClass.ClassName</li>
+                                }
+                            </ul>
+                        }
+                        else
+                        {
+                            <span class="text-muted fst-italic">No classes assigned</span>
+                        }
+                    </dd>
+
+                    <dt class="col-sm-3 text-muted mt-2" data-toggle="tooltip" title="Subjects the teacher teaches">Subjects:</dt>
+                    <dd class="col-sm-9 mt-2">
+                        @if (Model.Subjects != null && Model.Subjects.Any())
+                        {
+                            <ul class="list-unstyled mb-0">
+                                @foreach (var subject in Model.Subjects)
+                                {
+                                    <li><i class="fas fa-book text-success me-2"></i> @subject.Name</li>
+                                }
+                            </ul>
+                        }
+                        else
+                        {
+                            <span class="text-muted fst-italic">No subjects assigned</span>
+                        }
+                    </dd>
+                </dl>
+            </div>
+        </div>
+
+        <div class="mt-4 pt-3 border-top text-end">
+            <a asp-action="Index" class="btn btn-outline-secondary me-2">
+                <i class="fas fa-arrow-left"></i> Back to List
+            </a>
+            <a asp-action="Edit" asp-route-id="@Model.Id" class="btn btn-warning me-2">
+                <i class="fas fa-edit"></i> Edit
+            </a>
+            <a asp-action="Delete" asp-route-id="@Model.Id" class="btn btn-danger">
+                <i class="fas fa-trash-alt"></i> Delete
+            </a>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        // Ativar tooltip
+        $(function () {
+            $('[data-toggle="tooltip"]').tooltip();
+        });
+    </script>
+}

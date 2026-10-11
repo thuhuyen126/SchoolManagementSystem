@@ -1,0 +1,81 @@
+﻿@{
+    Layout = "_Dashboard";
+    ViewBag.PageTitle = "System Logs";
+    ViewBag.SubPageTitle = "Activity Log";
+}
+
+@model IEnumerable<SchoolManagementSystem.Data.Entities.ActivityLog>
+
+<div class="d-flex justify-content-between align-items-center mb-4 mt-3">
+    <h2 class="text-dark" style="font-weight: 600;">System Activity Log</h2>
+    <span class="badge bg-secondary fs-6">Total Records: @Model.Count()</span>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body p-0">
+        <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+            <table class="table table-hover table-striped mb-0">
+                <thead class="table-dark" style="position: sticky; top: 0; z-index: 1;">
+                    <tr>
+                        <th class="ps-4">Timestamp</th>
+                        <th>User</th>
+                        <th class="text-center">Action</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (!Model.Any())
+                    {
+                        <tr>
+                            <td colspan="4" class="text-center text-muted py-5">
+                                <i class="fas fa-clipboard-list fa-3x mb-3 text-light"></i>
+                                <h5>No activity logs found.</h5>
+                                <p>System activities will be recorded here.</p>
+                            </td>
+                        </tr>
+                    }
+                    else
+                    {
+                        foreach (var log in Model)
+                        {
+                            <tr>
+                                <td class="ps-4 align-middle text-muted" style="white-space: nowrap;">
+                                    <i class="far fa-calendar-alt me-1"></i> @log.Timestamp.ToString("dd/MM/yyyy HH:mm:ss")
+                                </td>
+                                <td class="align-middle fw-bold text-primary">
+                                    <i class="fas fa-user-circle me-1"></i> @log.Username
+                                </td>
+                                <td class="text-center align-middle">
+                                    @{
+                                        // Tự động gán màu và icon theo loại hành động
+                                        var actionName = log.Action?.ToLower() ?? "";
+                                        var badgeClass = actionName switch
+                                        {
+                                            "create" => "bg-success",
+                                            "update" => "bg-warning text-dark",
+                                            "delete" => "bg-danger",
+                                            "login" => "bg-info text-dark",
+                                            _ => "bg-secondary"
+                                        };
+                                        var iconClass = actionName switch
+                                        {
+                                            "create" => "fa-plus-circle",
+                                            "update" => "fa-edit",
+                                            "delete" => "fa-trash-alt",
+                                            "login" => "fa-sign-in-alt",
+                                            _ => "fa-cog"
+                                        };
+                                    }
+                                    <span class="badge @badgeClass px-3 py-2" style="min-width: 90px;">
+                                        <i class="fas @iconClass me-1"></i> @log.Action
+                                    </span>
+                                </td>
+                                <td class="align-middle">@log.Description</td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

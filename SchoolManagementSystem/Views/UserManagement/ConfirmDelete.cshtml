@@ -1,0 +1,49 @@
+﻿@{
+    Layout = "_Dashboard";
+    ViewBag.PageTitle = "Security Verification";
+    ViewBag.SubPageTitle = "Confirm Deletion";
+}
+
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6">
+        <div class="card shadow border-danger">
+            <div class="card-header bg-danger text-white text-center">
+                <h4 class="mb-0"><i class="fas fa-exclamation-triangle"></i> DANGER ZONE</h4>
+            </div>
+            <div class="card-body text-center p-5">
+                <i class="fas fa-envelope-open-text fa-4x text-muted mb-3"></i>
+                <h5 class="text-dark">Confirm user deletion</h5>
+                <p class="text-muted">You are about to permanently delete the user <strong>@ViewBag.UserEmailToDelete</strong> and associated records.</p>
+
+                @if (!ViewData.ModelState.IsValid)
+                {
+                    <div class="alert alert-danger">
+                        @Html.ValidationSummary(false, "", new { @class = "mb-0" })
+                    </div>
+                }
+
+                @if (ViewBag.RequestOtp == true)
+                {
+                <p class="text-muted">A confirmation code was sent to your administrator email. It expires after five minutes.</p>
+                <form asp-action="ConfirmDelete" method="post" class="mt-4">
+                    <div class="form-group mb-4">
+                        <input type="text" name="otpCode" class="form-control form-control-lg text-center fw-bold" placeholder="Enter 6-digit code" maxlength="6" pattern="[0-9]{6}" inputmode="numeric" required autocomplete="one-time-code" style="letter-spacing: 5px; font-size: 24px;">
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <a asp-action="Index1" class="btn btn-secondary px-4">Cancel</a>
+                        <button type="submit" class="btn btn-danger px-4"><i class="fas fa-trash-alt me-2"></i> Confirm Delete</button>
+                    </div>
+                </form>
+                }
+                else
+                {
+                    <form asp-action="Delete" method="post" class="mt-4">
+                        <input type="hidden" name="id" value="@ViewBag.TargetUserId" />
+                        <button type="submit" class="btn btn-danger px-4">Send confirmation code</button>
+                        <a asp-action="Index1" class="btn btn-secondary px-4">Cancel</a>
+                    </form>
+                }
+            </div>
+        </div>
+    </div>
+</div>

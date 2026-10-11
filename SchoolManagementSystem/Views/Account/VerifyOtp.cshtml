@@ -1,0 +1,41 @@
+﻿@model SchoolManagementSystem.Models.VerifyOtpViewModel
+@{
+    Layout = "_LayoutAccount";
+    ViewData["Title"] = "Verify OTP";
+}
+
+<div class="container" style="padding-top: 120px; padding-bottom: 50px;">
+    <div class="row justify-content-center">
+        <div class="col-md-5">
+            <div class="card shadow-lg border-0">
+                <div class="card-body p-5">
+                    <div class="text-center mb-4">
+                        <i class="fas fa-envelope-open-text fa-3x text-primary mb-3"></i>
+                        <h2 class="card-title" style="font-weight: 500; color: #333;">OTP Verification</h2>
+                        <p class="text-muted">We have sent a 6-digit code to your email.<br /><strong>@Model.Email</strong></p>
+                    </div>
+                    
+                    <form asp-action="VerifyOtp" method="post">
+                        <div asp-validation-summary="ModelOnly" class="text-danger mb-3 text-center"></div>
+
+                        <div class="mb-4">
+                            <label asp-for="Code" class="form-label font-weight-bold text-center d-block">Enter OTP Code</label>
+                            <input asp-for="Code" type="text" class="form-control form-control-lg text-center" placeholder="X X X X X X" autocomplete="off" style="letter-spacing: 10px; font-size: 24px;" maxlength="6" />
+                            <span asp-validation-for="Code" class="text-danger small d-block text-center mt-2"></span>
+                        </div>
+
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg shadow-sm">
+                                <i class="fas fa-check-circle me-2"></i> Verify & Login
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @await Html.PartialAsync("_ValidationScriptsPartial")
+}

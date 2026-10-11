@@ -1,0 +1,10 @@
+﻿@model SchoolManagementSystem.Data.Entities.Payment
+@{
+    ViewData["Title"] = "Edit Payment";
+}
+
+<h2>Edit Payment</h2>
+<form asp-action="Edit">
+    @await Html.PartialAsync("_Form", Model)
+    <button type="submit" class="btn btn-primary">Save</button>
+</form>

@@ -1,0 +1,111 @@
+﻿@{
+    Layout = "_Dashboard";
+    ViewBag.PageTitle = "Teachers";
+    ViewBag.SubPageTitle = "Index";
+}
+
+@using Newtonsoft.Json
+@model IEnumerable<SchoolManagementSystem.Data.Entities.Teacher>
+
+@{
+    ViewData["Title"] = "Teachers List";
+
+    // Define as configurações do JSON para evitar referência circular
+    var jsonSerializerSettings = new JsonSerializerSettings
+    {
+        ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
+        Formatting = Formatting.Indented // Formatação mais legível para debug
+    };
+
+    // Serializa o modelo usando essas configurações
+    var serializedData = JsonConvert.SerializeObject(Model, jsonSerializerSettings);
+}
+<h2>Teachers</h2>
+<div>
+    <a asp-action="Create" class="btn btn-success mb-3">Create Teacher</a>
+</div>
+
+@if (!Model.Any())
+{
+    <div class="alert alert-info">No teachers found.</div>
+}
+else
+{
+    <div id="Grid"></div>
+}
+
+@section Scripts {
+    <script id="profilePictureTemplate" type="text/x-template">
+        ${if(ImageId != null && ImageId != '00000000-0000-0000-0000-000000000000')}
+            <img src="http://127.0.0.1:10000/devstoreaccount1/teachers/${ImageId}" alt="Profile Picture" style="width: 50px; height: 50px; border-radius: 50%; object-fit: cover; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" />
+        ${else}
+            <img src="https://ui-avatars.com/api/?name=${FirstName}+${LastName}&background=random&color=fff&rounded=true&size=50" alt="Default Profile" style="width: 50px; height: 50px; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" />
+        ${/if}
+    </script>
+
+    <script id="actionTemplate" type="text/x-template">
+        <a href="/Teachers/Edit/${Id}" class="btn btn-sm btn-warning">Edit</a>
+        <a href="/Teachers/Delete/${Id}" class="btn btn-sm btn-danger">Delete</a>
+        <a href="/Teachers/Details/${Id}" class="btn btn-sm btn-primary">Details</a>
+    </script>
+
+    <script>
+        $(document).ready(function () {
+            var serializedData = @Html.Raw(serializedData);
+
+            // Mapeia o Status para um texto legível
+            serializedData.forEach(function (teacher) {
+                switch (teacher.Status) {
+                    case 0:
+                        teacher.StatusText = "Pending";
+                        break;
+                    case 1:
+                        teacher.StatusText = "Active";
+                        break;
+                    case 2:
+                        teacher.StatusText = "Inactive";
+                        break;
+                }
+            });
+
+            var grid = new ej.grids.Grid({
+                dataSource: serializedData,
+                allowPaging: true,
+                allowSorting: true,
+                allowFiltering: true,
+                allowGrouping: true,
+                filterSettings: { type: 'Menu' },
+                pageSettings: { pageSize: 10 },
+                toolbar: ['Search'],
+                groupSettings: { showGroupedColumn: true },
+                columns: [
+                    {
+                        field: "ImageFullPath",
+                        headerText: "Profile Picture",
+                        width: 120, // Tăng nhẹ width để Header không bị ép
+                        textAlign: "Center",
+                        template: "#profilePictureTemplate"
+                    },
+                    { field: "FirstName", headerText: "First Name", width: 120 },
+                    { field: "LastName", headerText: "Last Name", width: 120 },
+                    { field: "AcademicDegree", headerText: "Academic Degree", width: 150 },
+                    {
+                        field: "FormattedHireDate",
+                        headerText: "Hire Date",
+                        width: 150,
+                        textAlign: "Center"
+                    },
+                    { field: "StatusText", headerText: "Status", width: 100 },
+                    {
+                        headerText: "Actions",
+                        width: 180,
+                        textAlign: "Center",
+                        template: "#actionTemplate"
+                    }
+                ]
+            });
+
+            grid.appendTo("#Grid");
+        });
+    </script>
+}

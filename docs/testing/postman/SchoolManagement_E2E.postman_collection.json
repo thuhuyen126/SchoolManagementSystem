@@ -1,0 +1,951 @@
+{
+  "info": {
+    "_postman_id": "6e3dcb02-a49e-42bd-a053-c0e4b59f91f5",
+    "name": "SchoolManagement — Automated E2E",
+    "description": "Login → Mailpit → OTP → VerifyOtp → Admin Dashboard. Requires SCHOOL_TEST_MODE=true, TEST_EMAIL_MODE=local, and TEST_RECAPTCHA_BYPASS=true in the application process. Set test_password only as a local Postman environment value; never export it.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Negative & Validation",
+      "item": [
+        {
+          "name": "TC-AUTH-002 Invalid password",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const invalidPassword = 'wrong-' + pm.variables.replaceIn('{{$guid}}');",
+                  "pm.variables.set('tc_auth_002_invalid_password', invalidPassword);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const location = pm.response.headers.get('Location') || '';",
+                  "const body = pm.response.text();",
+                  "const setCookies = pm.response.headers.all().filter((header) => header.key.toLowerCase() === 'set-cookie').map((header) => header.value);",
+                  "const identityCookieIssued = setCookies.some((cookie) => /^\\.AspNetCore\\.Identity\\.Application=/i.test(cookie));",
+                  "const ok = pm.response.code === 200 && !location.includes('/Account/VerifyOtp') && !identityCookieIssued && /<form\\b/i.test(body) && /Login/i.test(body);",
+                  "pm.test('Invalid credentials return the Login page', function () { pm.expect(pm.response.code).to.eql(200); pm.expect(body).to.match(/<form\\b/i); });",
+                  "pm.test('Invalid credentials do not proceed to OTP', function () { pm.expect(location).not.to.include('/Account/VerifyOtp'); });",
+                  "pm.test('Invalid credentials do not issue an Identity auth cookie', function () { pm.expect(identityCookieIssued).to.eql(false); });",
+                  "if (!ok) pm.execution.setNextRequest(null);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "Username", "value": "{{test_username}}", "type": "text" },
+                { "key": "Password", "value": "{{tc_auth_002_invalid_password}}", "type": "text" },
+                { "key": "RememberMe", "value": "{{test_remember_me}}", "type": "text" }
+              ]
+            },
+            "url": "{{base_url}}/Account/Login"
+          },
+          "protocolProfileBehavior": { "followRedirects": false }
+        },
+        {
+          "name": "TC-AUTH-006 VerifyOtp without pending login",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.cookies.jar().clear(pm.variables.replaceIn('{{base_url}}'), function (error) {",
+                  "  if (error) throw new Error('Could not create a clean cookie context for AUTH-006.');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const location = pm.response.headers.get('Location') || '';",
+                  "const ok = pm.response.code === 302 && location.includes('/Account/Login');",
+                  "pm.test('VerifyOtp without pending state redirects to Login', function () { pm.expect(pm.response.code).to.eql(302); pm.expect(location).to.include('/Account/Login'); });",
+                  "if (!ok) pm.execution.setNextRequest(null);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/Account/VerifyOtp"
+          },
+          "protocolProfileBehavior": { "followRedirects": false }
+        },
+        {
+          "name": "TC-API-004 Non-integer Student API route",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/StudentsApi/BySchoolClass/not-an-integer"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const ok = pm.response.code === 400;",
+                  "pm.test('Non-integer route value is rejected as a client error', function () { pm.expect(pm.response.code).to.eql(400); });",
+                  "if (!ok) pm.execution.setNextRequest(null);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Authentication E2E",
+      "item": [
+        {
+          "name": "1. GET Login Page",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/Account/Login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.text();",
+                  "const ok = pm.response.code === 200 && /<form\\b/i.test(body) && /Username/i.test(body) && /Password/i.test(body);",
+                  "pm.test('Login page returns 200 with login fields', function () { pm.expect(ok).to.eql(true); });",
+                  "if (!ok) pm.execution.setNextRequest(null);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. POST Login",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set('login_started_at', new Date().toISOString());",
+                  "pm.environment.unset('otp_message_id');",
+                  "pm.environment.unset('otp_code');",
+                  "pm.environment.unset('verify_otp_antiforgery_token');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const location = pm.response.headers.get('Location') || '';",
+                  "const ok = pm.response.code === 302 && location.includes('/Account/VerifyOtp');",
+                  "pm.test('Login redirects to VerifyOtp', function () { pm.expect(pm.response.code).to.eql(302); pm.expect(location).to.include('/Account/VerifyOtp'); });",
+                  "if (!ok) pm.execution.setNextRequest(null);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "Username", "value": "{{test_username}}", "type": "text" },
+                { "key": "Password", "value": "{{test_password}}", "type": "text" },
+                { "key": "RememberMe", "value": "{{test_remember_me}}", "type": "text" }
+              ]
+            },
+            "url": "{{base_url}}/Account/Login"
+          },
+          "protocolProfileBehavior": { "followRedirects": false }
+        },
+        {
+          "name": "3. Get Mailpit Messages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpit_url}}/api/v1/messages"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let selected = null;",
+                  "let parseError = false;",
+                  "try {",
+                  "  const data = pm.response.json();",
+                  "  const startedAt = Date.parse(pm.environment.get('login_started_at') || '');",
+                  "  const username = (pm.environment.get('test_username') || '').toLowerCase();",
+                  "  const messages = Array.isArray(data.messages) ? data.messages : [];",
+                  "  const addressedToTestUser = (message) => {",
+                  "    const recipients = Array.isArray(message.To) ? message.To : [];",
+                  "    return recipients.some((recipient) => {",
+                  "      const address = typeof recipient === 'string' ? recipient : (recipient && (recipient.Address || recipient.address || recipient.Email || recipient.email)) || '';",
+                  "      return String(address).toLowerCase() === username;",
+                  "    });",
+                  "  };",
+                  "  const candidates = messages.filter((message) => {",
+                  "    const createdAt = Date.parse(message.Created || '');",
+                  "    return addressedToTestUser(message) && Number.isFinite(createdAt) && Number.isFinite(startedAt) && createdAt > startedAt;",
+                  "  }).sort((a, b) => Date.parse(b.Created) - Date.parse(a.Created));",
+                  "  selected = candidates[0] || null;",
+                  "} catch (_) { parseError = true; }",
+                  "const ok = pm.response.code === 200 && !parseError && selected && (selected.ID || selected.Id);",
+                  "if (ok) pm.environment.set('otp_message_id', selected.ID || selected.Id);",
+                  "pm.test('Mailpit has a new matching message after Login', function () { pm.expect(pm.response.code).to.eql(200); pm.expect(parseError).to.eql(false); pm.expect(selected && (selected.ID || selected.Id), 'new matching message ID').to.be.ok; });",
+                  "if (!ok) pm.execution.setNextRequest(null);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Get OTP Message",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpit_url}}/api/v1/message/{{otp_message_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let uniqueCodes = [];",
+                  "let parseError = false;",
+                  "try {",
+                  "  const data = pm.response.json();",
+                  "  const htmlText = (data.HTML || '').replace(/<style\\b[^>]*>[\\s\\S]*?<\\/style>/gi, ' ').replace(/<[^>]*>/g, ' ');",
+                  "  const content = [data.Text || '', htmlText].join('\\n');",
+                  "  const contextPattern = /Mã\\s+xác\\s+thực\\s+OTP\\s+để\\s+đăng\\s+nhập\\s+của\\s+bạn\\s+là\\s*:?[^0-9]{0,300}(\\d{6})(?!\\d)/gi;",
+                  "  let match;",
+                  "  const found = [];",
+                  "  while ((match = contextPattern.exec(content)) !== null) found.push(match[1]);",
+                  "  uniqueCodes = [...new Set(found)];",
+                  "} catch (_) { parseError = true; }",
+                  "const ok = pm.response.code === 200 && !parseError && uniqueCodes.length === 1 && /^\\d{6}$/.test(uniqueCodes[0]);",
+                  "if (ok) pm.environment.set('otp_code', uniqueCodes[0]);",
+                  "pm.test('OTP is uniquely identified from the login email context', function () { pm.expect(pm.response.code).to.eql(200); pm.expect(parseError).to.eql(false); pm.expect(uniqueCodes.length, 'unique contextual OTP count').to.eql(1); if (uniqueCodes.length === 1) pm.expect(uniqueCodes[0]).to.match(/^\\d{6}$/); });",
+                  "if (!ok) pm.execution.setNextRequest(null);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. GET VerifyOtp",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/Account/VerifyOtp"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const html = pm.response.text();",
+                  "const attr = (tag, name) => { const m = tag.match(new RegExp(name + '=\\\"([^\\\"]*)\\\"', 'i')); return m ? m[1] : ''; };",
+                  "const decode = (value) => value.replace(/&amp;/g, '&').replace(/&quot;/g, String.fromCharCode(34)).replace(/&#39;|&#x27;/gi, String.fromCharCode(39)).replace(/&lt;/g, '<').replace(/&gt;/g, '>');",
+                  "let token = '';",
+                  "const inputs = html.match(/<input\\b[^>]*>/gi) || [];",
+                  "for (const input of inputs) { if (attr(input, 'name') === '__RequestVerificationToken') { token = decode(attr(input, 'value')); break; } }",
+                  "const pageOk = /OTP Verification/i.test(html) && token.length > 0;",
+                  "const ok = pm.response.code === 200 && pageOk;",
+                  "if (ok) pm.environment.set('verify_otp_antiforgery_token', token);",
+                  "pm.test('VerifyOtp page and antiforgery field are present', function () { pm.expect(pm.response.code).to.eql(200); pm.expect(pageOk).to.eql(true); });",
+                  "if (!ok) pm.execution.setNextRequest(null);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. POST VerifyOtp",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "Code", "value": "{{otp_code}}", "type": "text" },
+                { "key": "Email", "value": "{{test_username}}", "type": "text" },
+                { "key": "RememberMe", "value": "{{test_remember_me}}", "type": "text" },
+                { "key": "__RequestVerificationToken", "value": "{{verify_otp_antiforgery_token}}", "type": "text" }
+              ]
+            },
+            "url": "{{base_url}}/Account/VerifyOtp"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const location = pm.response.headers.get('Location') || '';",
+                  "const ok = pm.response.code === 302 && location.includes('/Dashboard/AdminDashboard');",
+                  "pm.test('VerifyOtp redirects to Admin Dashboard', function () { pm.expect(pm.response.code).to.eql(302); pm.expect(location).to.include('/Dashboard/AdminDashboard'); });",
+                  "if (!ok) pm.execution.setNextRequest(null);"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": { "followRedirects": false }
+        },
+        {
+          "name": "7. GET Admin Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/Dashboard/AdminDashboard"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.text();",
+                  "const ok = pm.response.code === 200 && /<h1[^>]*>\\s*Admin Dashboard\\s*<\\/h1>/i.test(body);",
+                  "pm.test('Authenticated Admin Dashboard returns 200', function () { pm.expect(pm.response.code).to.eql(200); pm.expect(body).to.match(/<h1[^>]*>\\s*Admin Dashboard\\s*<\\/h1>/i); });",
+                  "if (!ok) pm.execution.setNextRequest(null);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Student Management",
+      "item": [
+        {
+          "name": "TC-STU-001 — List and open existing student details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/Students/Index"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const html = pm.response.text();",
+                  "let records = [];",
+                  "let parseSucceeded = false;",
+                  "let selectedId = '';",
+                  "try {",
+                  "  const match = html.match(/var\\s+serializedData\\s*=\\s*(\\[[\\s\\S]*?\\]);\\s*serializedData\\.forEach\\s*\\(/);",
+                  "  if (!match) throw new Error('Student list data was not found.');",
+                  "  records = JSON.parse(match[1]);",
+                  "  parseSucceeded = Array.isArray(records);",
+                  "  const matches = records.filter((student) => student && student.User && student.User.Email === 'student.test@school.local');",
+                  "  if (matches.length === 1 && Number.isInteger(matches[0].Id) && matches[0].Id > 0) selectedId = String(matches[0].Id);",
+                  "} catch (_) { parseSucceeded = false; }",
+                  "const pageOk = /<h2[^>]*>\\s*Students\\s*<\\/h2>/i.test(html);",
+                  "const ok = pm.response.code === 200 && pageOk && parseSucceeded && selectedId.length > 0;",
+                  "if (ok) pm.environment.set('student_id', selectedId);",
+                  "pm.test('Student index returns the expected page', function () { pm.expect(pm.response.code).to.eql(200); pm.expect(pageOk).to.eql(true); });",
+                  "pm.test('Exactly one seeded test Student ID was extracted', function () { pm.expect(parseSucceeded).to.eql(true); pm.expect(selectedId.length > 0).to.eql(true); });",
+                  "if (!ok) pm.execution.setNextRequest(null);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "TC-STU-001 — Open existing student details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/Students/Details/{{student_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const html = pm.response.text();",
+                  "const detailsMarker = /<h2[^>]*>\\s*Student Details\\s*<\\/h2>/i.test(html);",
+                  "const ok = pm.response.code === 200 && detailsMarker;",
+                  "pm.test('Student details returns 200 with its page marker', function () { pm.expect(pm.response.code).to.eql(200); pm.expect(detailsMarker).to.eql(true); });",
+                  "if (!ok) pm.execution.setNextRequest(null);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Disposable Fixture Setup",
+      "description": "Creates one run-scoped Pending User, two dedicated SchoolClasses, two dedicated Courses, and one disposable Student. Run after Authentication E2E in the same Newman execution so the Admin session is present. Guard checks Postman variables and localhost URLs only; it cannot inspect the running app process or independently verify its database target. Verify SchoolManagementDb_Test from PowerShell before Newman. Export runtime variables to a separate local environment file to retain fixture_run_id and discovered IDs for review/recovery. No cleanup requests are included.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "function stop(m){pm.environment.set(\"fixture_step_status\",\"BLOCKED\");pm.execution.setNextRequest(null);throw new Error(\"Fixture safety guard: \"+m);}",
+              "const req=[\"school_test_mode\",\"test_email_mode\",\"base_url\",\"mailpit_url\"];if(req.some(k=>{const v=pm.environment.get(k);return v==null||String(v).trim()===\"\";}))stop(\"required environment variables missing\");",
+              "if(String(pm.environment.get(\"school_test_mode\")).trim().toLowerCase()!==\"true\")stop(\"school_test_mode must be true\");",
+              "if(String(pm.environment.get(\"test_email_mode\")).trim().toLowerCase()!==\"local\")stop(\"test_email_mode must be local\");",
+              "function local(v,p){try{const u=new URL(String(v));return u.protocol===\"http:\"&&u.hostname===\"localhost\"&&u.port===p&&(u.pathname===\"/\"||u.pathname===\"\")&&!u.search&&!u.hash;}catch(_){return false;}}",
+              "if(!local(pm.environment.get(\"base_url\"),\"5013\")||!local(pm.environment.get(\"mailpit_url\"),\"8025\"))stop(\"only localhost app:5013 and Mailpit:8025 are allowed\");",
+              "const order=[\"Preflight - Verify Local Admin Session\",\"GET Register Form\",\"Register Pending User\",\"Discover Pending User\",\"GET SchoolClass Create Form\",\"Create SchoolClass A\",\"Verify SchoolClass A\",\"Create SchoolClass B\",\"Discover SchoolClasses\",\"GET Course Create Form\",\"Create Course A\",\"Verify Course A\",\"Create Course B\",\"Discover Courses\",\"Verify Class A Course\",\"Verify Class Course Relationships\",\"GET Student Create Form\",\"Create Disposable Student\",\"Discover Disposable Student\"], current=pm.info.requestName;",
+              "if(current===order[0]){",
+              " const stale=[\"fixture_run_id\",\"fixture_setup_state\",\"fixture_user_id\",\"fixture_student_id\"];",
+              " if(stale.some(k=>{const v=pm.environment.get(k);return v!=null&&String(v).trim()!==\"\";}))stop(\"previous fixture markers exist; recover before rerunning\");",
+              " const id=pm.variables.replaceIn(\"{{$guid}}\").replace(/[^a-f0-9]/gi,\"\").toUpperCase();if(!/^[A-F0-9]{32}$/.test(id))stop(\"run ID generation failed\");",
+              " pm.environment.set(\"fixture_run_id\",id);pm.environment.set(\"fixture_setup_state\",\"RUNNING\");",
+              " pm.environment.set(\"fixture_email\",\"e2e-stu-\"+id.toLowerCase()+\"@school.local\");pm.environment.set(\"fixture_first_name\",\"E2EStu\");pm.environment.set(\"fixture_last_name\",id);",
+              " pm.environment.set(\"fixture_class_a_name\",\"E2E-STU-\"+id+\"-A\");pm.environment.set(\"fixture_class_b_name\",\"E2E-STU-\"+id+\"-B\");",
+              " pm.environment.set(\"fixture_course_a_name\",\"E2E-STU-\"+id+\"-A\");pm.environment.set(\"fixture_course_b_name\",\"E2E-STU-\"+id+\"-B\");",
+              " const d=new Date(), e=new Date(d.getTime());e.setUTCFullYear(e.getUTCFullYear()+1);pm.environment.set(\"fixture_start_date\",d.toISOString().slice(0,10));pm.environment.set(\"fixture_end_date\",e.toISOString().slice(0,10));",
+              "}else{",
+              " if(pm.environment.get(\"fixture_setup_state\")!==\"RUNNING\"||pm.environment.get(\"fixture_step_status\")!==\"PASSED\")stop(\"prior step did not pass\");",
+              " const i=order.indexOf(current);if(i<1||pm.environment.get(\"fixture_last_successful_request\")!==order[i-1])stop(\"request sequence invalid\");",
+              "}",
+              "pm.environment.set(\"fixture_step_status\",\"PENDING\");"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "Preflight - Verify Local Admin Session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/UserManagement/Index1",
+            "description": "Read-only Admin authorization preflight."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const h=pm.response.text(),ok=pm.response.code===200&&/User Management List/i.test(h);pm.test(\"Admin session reaches protected User Management\",()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(h).to.match(/User Management List/i);});if(ok)pm.environment.set(\"fixture_admin_verified\",\"true\");finishStep(ok);function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET Register Form",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/Account/Register"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const h=pm.response.text(),ok=pm.response.code===200&&/<h2[^>]*>\\s*Register\\s*<\\/h2>/i.test(h)&&/name=[\"']Username[\"']/i.test(h);pm.test(\"Register form is available\",()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(ok).to.eql(true);});finishStep(ok);function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register Pending User",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/Account/Register",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "FirstName",
+                  "value": "{{fixture_first_name}}",
+                  "type": "text"
+                },
+                {
+                  "key": "LastName",
+                  "value": "{{fixture_last_name}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Username",
+                  "value": "{{fixture_email}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "description": "Register source has no anti-forgery validator/token. No setup email body is read."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const h=pm.response.text(),ok=pm.response.code===200&&/<h2[^>]*>\\s*Login\\s*<\\/h2>/i.test(h);pm.test(\"Register returns Login view after local email delivery\",()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(ok).to.eql(true);});finishStep(ok);function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "Discover Pending User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/UserManagement/Index1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const h=pm.response.text(),email=String(pm.environment.get(\"fixture_email\")).toLowerCase(),rows=h.match(/<tr\\b[\\s\\S]*?<\\/tr>/gi)||[],hits=rows.filter(x=>x.toLowerCase().includes(email));let id=\"\";if(hits.length===1){const found=[...hits[0].matchAll(/confirmDelete\\(['\"]([^'\"]+)['\"]\\)/gi)].map(x=>x[1]);if(new Set(found).size===1)id=found[0];}const ok=pm.response.code===200&&hits.length===1&&id.length>0;if(ok)pm.environment.set(\"fixture_user_id\",id);pm.test(\"Exactly one run-specific User ID discovered\",()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(hits.length).to.eql(1);pm.expect(id.length>0).to.eql(true);});finishStep(ok);function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET SchoolClass Create Form",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/SchoolClasses/Create"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const h=pm.response.text(),t=getToken(h),ok=pm.response.code===200&&/Create School Class/i.test(h)&&t.length>0;if(ok)pm.environment.set(\"fixture_class_antiforgery\",t);pm.test(\"SchoolClass form and anti-forgery token present\",()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(t.length>0).to.eql(true);});finishStep(ok);function attr(t,n){const r=t.match(new RegExp(\"\\\\b\"+n+\"\\\\s*=\\\\s*(?:\\\"([^\\\"]*)\\\"|'([^']*)'|([^\\\\s>]+))\",\"i\"));return r?(r[1]||r[2]||r[3]||\"\"):\"\";}function getToken(h){for(const t of(h.match(/<input\\b[^>]*>/gi)||[])){if(attr(t,\"name\")===\"__RequestVerificationToken\")return attr(t,\"value\");}return \"\";}function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create SchoolClass A",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/SchoolClasses/Create",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "ClassName",
+                  "value": "{{fixture_class_a_name}}",
+                  "type": "text"
+                },
+                {
+                  "key": "StartDate",
+                  "value": "{{fixture_start_date}}",
+                  "type": "text"
+                },
+                {
+                  "key": "EndDate",
+                  "value": "{{fixture_end_date}}",
+                  "type": "text"
+                },
+                {
+                  "key": "__RequestVerificationToken",
+                  "value": "{{fixture_class_antiforgery}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const loc=pm.response.headers.get(\"Location\")||\"\",ok=pm.response.code===302&&/\\/SchoolClasses(?:\\/Index)?(?:$|[?#])/i.test(loc);pm.test(\"SchoolClass A created\",()=>{pm.expect(pm.response.code).to.eql(302);pm.expect(ok).to.eql(true);});finishStep(ok);function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "Verify SchoolClass A",
+          "request": { "method": "GET", "header": [], "url": "{{base_url}}/SchoolClasses/Index", "description": "Read-only verification immediately after creating Class A." },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const h=pm.response.text();let a=[];try{const m=h.indexOf('var serializedData ='),s=m<0?-1:h.indexOf('[',m),e=s<0?-1:h.indexOf('];',s);if(s>=0&&e>=0)a=JSON.parse(h.slice(s,e+1));}catch(_){}const hit=a.filter(x=>x.ClassName===pm.environment.get('fixture_class_a_name')),ok=pm.response.code===200&&hit.length===1&&hit[0].Id!=null;if(ok)pm.environment.set('fixture_class_a_id',String(hit[0].Id));pm.test('Class A exists exactly once after creation',()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(hit.length).to.eql(1);pm.expect(ok).to.eql(true);});finishStep(ok);function finishStep(ok){if(ok){pm.environment.set('fixture_last_successful_request',pm.info.requestName);pm.environment.set('fixture_step_status','PASSED');}else{pm.environment.set('fixture_step_status','FAILED');pm.execution.setNextRequest(null);}}"] } }]
+        },
+        {
+          "name": "Create SchoolClass B",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/SchoolClasses/Create",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "ClassName",
+                  "value": "{{fixture_class_b_name}}",
+                  "type": "text"
+                },
+                {
+                  "key": "StartDate",
+                  "value": "{{fixture_start_date}}",
+                  "type": "text"
+                },
+                {
+                  "key": "EndDate",
+                  "value": "{{fixture_end_date}}",
+                  "type": "text"
+                },
+                {
+                  "key": "__RequestVerificationToken",
+                  "value": "{{fixture_class_antiforgery}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const loc=pm.response.headers.get(\"Location\")||\"\",ok=pm.response.code===302&&/\\/SchoolClasses(?:\\/Index)?(?:$|[?#])/i.test(loc);pm.test(\"SchoolClass B created\",()=>{pm.expect(pm.response.code).to.eql(302);pm.expect(ok).to.eql(true);});finishStep(ok);function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "Discover SchoolClasses",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/SchoolClasses/Index"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const h=pm.response.text();let a=[];try{a=parseData(h);}catch(_){}const ca=a.filter(x=>x.ClassName===pm.environment.get(\"fixture_class_a_name\")),cb=a.filter(x=>x.ClassName===pm.environment.get(\"fixture_class_b_name\")),ok=pm.response.code===200&&Array.isArray(a)&&ca.length===1&&cb.length===1&&ca[0].Id!=null&&cb[0].Id!=null;if(ok){pm.environment.set(\"fixture_class_a_id\",String(ca[0].Id));pm.environment.set(\"fixture_class_b_id\",String(cb[0].Id));}pm.test(\"Exactly one ID for each disposable class\",()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(ca.length).to.eql(1);pm.expect(cb.length).to.eql(1);pm.expect(ok).to.eql(true);});finishStep(ok);function parseData(h){const m=h.indexOf(\"var serializedData =\");const s=m<0?-1:h.indexOf(\"[\",m);const e=s<0?-1:h.indexOf(\"];\",s);if(s<0||e<0)throw new Error(\"serializedData missing\");return JSON.parse(h.slice(s,e+1));}function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET Course Create Form",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/Courses/Create"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const h=pm.response.text(),t=getToken(h),v=[...h.matchAll(/name=[\"']SelectedSchoolClassIds[\"'][^>]*value=[\"']([^\"']+)[\"']/gi)].map(x=>x[1]),a=v.includes(String(pm.environment.get(\"fixture_class_a_id\"))),b=v.includes(String(pm.environment.get(\"fixture_class_b_id\"))),ok=pm.response.code===200&&/Create Course/i.test(h)&&t.length>0&&a&&b;if(ok)pm.environment.set(\"fixture_course_antiforgery\",t);pm.test(\"Course form has both classes and anti-forgery token\",()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(t.length>0).to.eql(true);pm.expect(a).to.eql(true);pm.expect(b).to.eql(true);});finishStep(ok);function attr(t,n){const r=t.match(new RegExp(\"\\\\b\"+n+\"\\\\s*=\\\\s*(?:\\\"([^\\\"]*)\\\"|'([^']*)'|([^\\\\s>]+))\",\"i\"));return r?(r[1]||r[2]||r[3]||\"\"):\"\";}function getToken(h){for(const t of(h.match(/<input\\b[^>]*>/gi)||[])){if(attr(t,\"name\")===\"__RequestVerificationToken\")return attr(t,\"value\");}return \"\";}function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Course A",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/Courses/Create",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "Name",
+                  "value": "{{fixture_course_a_name}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Duration",
+                  "value": "1",
+                  "type": "text"
+                },
+                {
+                  "key": "SelectedSchoolClassIds",
+                  "value": "{{fixture_class_a_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "__RequestVerificationToken",
+                  "value": "{{fixture_course_antiforgery}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const loc=pm.response.headers.get(\"Location\")||\"\",ok=pm.response.code===302&&/\\/Courses(?:\\/Index)?(?:$|[?#])/i.test(loc);pm.test(\"Course A created\",()=>{pm.expect(pm.response.code).to.eql(302);pm.expect(ok).to.eql(true);});finishStep(ok);function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "Verify Course A",
+          "request": { "method": "GET", "header": [], "url": "{{base_url}}/Courses/Index", "description": "Read-only verification immediately after creating Course A." },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const h=pm.response.text();let a=[];try{const m=h.indexOf('var serializedData ='),s=m<0?-1:h.indexOf('[',m),e=s<0?-1:h.indexOf('];',s);if(s>=0&&e>=0)a=JSON.parse(h.slice(s,e+1));}catch(_){}const hit=a.filter(x=>x.Name===pm.environment.get('fixture_course_a_name')),ok=pm.response.code===200&&hit.length===1&&hit[0].Id!=null;if(ok)pm.environment.set('fixture_course_a_id',String(hit[0].Id));pm.test('Course A exists exactly once after creation',()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(hit.length).to.eql(1);pm.expect(ok).to.eql(true);});finishStep(ok);function finishStep(ok){if(ok){pm.environment.set('fixture_last_successful_request',pm.info.requestName);pm.environment.set('fixture_step_status','PASSED');}else{pm.environment.set('fixture_step_status','FAILED');pm.execution.setNextRequest(null);}}"] } }]
+        },
+        {
+          "name": "Create Course B",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/Courses/Create",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "Name",
+                  "value": "{{fixture_course_b_name}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Duration",
+                  "value": "1",
+                  "type": "text"
+                },
+                {
+                  "key": "SelectedSchoolClassIds",
+                  "value": "{{fixture_class_b_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "__RequestVerificationToken",
+                  "value": "{{fixture_course_antiforgery}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const loc=pm.response.headers.get(\"Location\")||\"\",ok=pm.response.code===302&&/\\/Courses(?:\\/Index)?(?:$|[?#])/i.test(loc);pm.test(\"Course B created\",()=>{pm.expect(pm.response.code).to.eql(302);pm.expect(ok).to.eql(true);});finishStep(ok);function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "Discover Courses",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/Courses/Index"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const h=pm.response.text();let a=[];try{a=parseData(h);}catch(_){}const ca=a.filter(x=>x.Name===pm.environment.get(\"fixture_course_a_name\")),cb=a.filter(x=>x.Name===pm.environment.get(\"fixture_course_b_name\")),ok=pm.response.code===200&&Array.isArray(a)&&ca.length===1&&cb.length===1&&ca[0].Id!=null&&cb[0].Id!=null;if(ok){pm.environment.set(\"fixture_course_a_id\",String(ca[0].Id));pm.environment.set(\"fixture_course_b_id\",String(cb[0].Id));}pm.test(\"Exactly one ID for each disposable course\",()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(ca.length).to.eql(1);pm.expect(cb.length).to.eql(1);pm.expect(ok).to.eql(true);});finishStep(ok);function parseData(h){const m=h.indexOf(\"var serializedData =\");const s=m<0?-1:h.indexOf(\"[\",m);const e=s<0?-1:h.indexOf(\"];\",s);if(s<0||e<0)throw new Error(\"serializedData missing\");return JSON.parse(h.slice(s,e+1));}function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify Class A Course",
+          "request": { "method": "GET", "header": [], "url": "{{base_url}}/SchoolClasses/Index", "description": "Read-only verifies Course A was associated with Class A before further fixture setup." },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const h=pm.response.text();let a=[];try{const m=h.indexOf('var serializedData ='),s=m<0?-1:h.indexOf('[',m),e=s<0?-1:h.indexOf('];',s);if(s>=0&&e>=0)a=JSON.parse(h.slice(s,e+1));}catch(_){}const hit=a.filter(x=>x.Id==pm.environment.get('fixture_class_a_id')),ok=pm.response.code===200&&hit.length===1&&String(hit[0].CourseId)===String(pm.environment.get('fixture_course_a_id'));pm.test('Class A has Course A relationship',()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(hit.length).to.eql(1);pm.expect(ok).to.eql(true);});finishStep(ok);function finishStep(ok){if(ok){pm.environment.set('fixture_last_successful_request',pm.info.requestName);pm.environment.set('fixture_step_status','PASSED');}else{pm.environment.set('fixture_step_status','FAILED');pm.execution.setNextRequest(null);}}"] } }]
+        },
+        {
+          "name": "Verify Class Course Relationships",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/SchoolClasses/Index"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const h=pm.response.text();let a=[];try{a=parseData(h);}catch(_){}const ca=a.filter(x=>x.ClassName===pm.environment.get(\"fixture_class_a_name\")),cb=a.filter(x=>x.ClassName===pm.environment.get(\"fixture_class_b_name\")),ok=pm.response.code===200&&Array.isArray(a)&&ca.length===1&&cb.length===1&&String(ca[0].CourseId)===String(pm.environment.get(\"fixture_course_a_id\"))&&String(cb[0].CourseId)===String(pm.environment.get(\"fixture_course_b_id\"));pm.test(\"Class A/B each link to matching Course\",()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(ok).to.eql(true);});finishStep(ok);function parseData(h){const m=h.indexOf(\"var serializedData =\");const s=m<0?-1:h.indexOf(\"[\",m);const e=s<0?-1:h.indexOf(\"];\",s);if(s<0||e<0)throw new Error(\"serializedData missing\");return JSON.parse(h.slice(s,e+1));}function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET Student Create Form",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/Students/Create"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const h=pm.response.text(),t=getToken(h),uid=String(pm.environment.get(\"fixture_user_id\")),cid=String(pm.environment.get(\"fixture_class_a_id\")),uv=h.includes('value=\"'+uid+'\"')||h.includes(\"value='\"+uid+\"'\"),cv=h.includes('value=\"'+cid+'\"')||h.includes(\"value='\"+cid+\"'\"),ok=pm.response.code===200&&/Create Student/i.test(h)&&t.length>0&&uv&&cv;if(ok)pm.environment.set(\"fixture_student_antiforgery\",t);pm.test(\"Student form has fixture User/Class options and anti-forgery token\",()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(t.length>0).to.eql(true);pm.expect(uv).to.eql(true);pm.expect(cv).to.eql(true);});finishStep(ok);function attr(t,n){const r=t.match(new RegExp(\"\\\\b\"+n+\"\\\\s*=\\\\s*(?:\\\"([^\\\"]*)\\\"|'([^']*)'|([^\\\\s>]+))\",\"i\"));return r?(r[1]||r[2]||r[3]||\"\"):\"\";}function getToken(h){for(const t of(h.match(/<input\\b[^>]*>/gi)||[])){if(attr(t,\"name\")===\"__RequestVerificationToken\")return attr(t,\"value\");}return \"\";}function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Disposable Student",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/Students/Create",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "UserId",
+                  "value": "{{fixture_user_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "FirstName",
+                  "value": "{{fixture_first_name}}",
+                  "type": "text"
+                },
+                {
+                  "key": "LastName",
+                  "value": "{{fixture_last_name}}",
+                  "type": "text"
+                },
+                {
+                  "key": "SchoolClassId",
+                  "value": "{{fixture_class_a_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "EnrollmentDate",
+                  "value": "{{fixture_start_date}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Status",
+                  "value": "Active",
+                  "type": "text"
+                },
+                {
+                  "key": "__RequestVerificationToken",
+                  "value": "{{fixture_student_antiforgery}}",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const loc=pm.response.headers.get(\"Location\")||\"\",ok=pm.response.code===302&&/\\/Students(?:\\/Index)?(?:$|[?#])/i.test(loc);pm.test(\"Disposable Student created\",()=>{pm.expect(pm.response.code).to.eql(302);pm.expect(ok).to.eql(true);});finishStep(ok);function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
+        },
+        {
+          "name": "Discover Disposable Student",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/Students/Index"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const h=pm.response.text();let a=[];try{a=parseData(h);}catch(_){}const email=String(pm.environment.get(\"fixture_email\")).toLowerCase(),hits=a.filter(s=>{const u=s.User||s.user;return String(u&&(u.Email||u.email)||\"\").toLowerCase()===email;}),s=hits.length===1?hits[0]:null,idok=!!s&&s.Id!=null,imgok=!!s&&String(s.ImageId||\"\").toLowerCase()===\"00000000-0000-0000-0000-000000000000\",classok=!!s&&String(s.SchoolClassId)===String(pm.environment.get(\"fixture_class_a_id\")),ok=pm.response.code===200&&Array.isArray(a)&&hits.length===1&&idok&&imgok&&classok;if(ok){pm.environment.set(\"fixture_student_id\",String(s.Id));pm.environment.set(\"fixture_setup_state\",\"READY_FOR_REVIEW\");}pm.test(\"One disposable Student linked to fixture User and Class A; no image\",()=>{pm.expect(pm.response.code).to.eql(200);pm.expect(hits.length).to.eql(1);pm.expect(imgok).to.eql(true);pm.expect(classok).to.eql(true);});finishStep(ok);function parseData(h){const m=h.indexOf(\"var serializedData =\");const s=m<0?-1:h.indexOf(\"[\",m);const e=s<0?-1:h.indexOf(\"];\",s);if(s<0||e<0)throw new Error(\"serializedData missing\");return JSON.parse(h.slice(s,e+1));}function finishStep(ok){if(ok){pm.environment.set(\"fixture_last_successful_request\",pm.info.requestName);pm.environment.set(\"fixture_step_status\",\"PASSED\");}else{pm.environment.set(\"fixture_step_status\",\"FAILED\");pm.execution.setNextRequest(null);}}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
